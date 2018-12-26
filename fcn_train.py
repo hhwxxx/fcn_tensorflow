@@ -127,7 +127,7 @@ def train(tfrecord_folder, dataset_split, is_training):
                     format_str = ('%s: step %d, loss = %.2f (%.1f examples/sec; '
                                   '%.3f sec/batch)')
                     print (format_str % (datetime.now(), self._step, loss_value,
-                           examples_per_sec, sec_per_batch))
+                                         examples_per_sec, sec_per_batch))
 
         config = tf.ConfigProto(log_device_placement=False)
         config.gpu_options.allow_growth = True

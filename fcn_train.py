@@ -3,14 +3,12 @@ from __future__ import division
 from __future__ import print_function
 
 import os
-import shutil
 import time
 from datetime import datetime
 
 import tensorflow as tf
 
 import core
-import models
 import input_pipeline
 
 slim = tf.contrib.slim
@@ -23,13 +21,13 @@ flags.DEFINE_string('tfrecord_folder',
 flags.DEFINE_string('dataset_split', 'train',
                     'Using which dataset split to train the network.')
 
-flags.DEFINE_string('model_variant', 'fcn_8s', 'Model variant.')
+flags.DEFINE_string('model_variant', 'fcn_32s', 'Model variant.')
 flags.DEFINE_string('restore_ckpt_path',
                     './init_models/vgg_16.ckpt',
                     'Path to checkpoint.')
 
 flags.DEFINE_string('train_dir',
-                    './exp/fcn_8s/train',
+                    './exp/fcn_32s/train',
                     'Training directory.')
 
 flags.DEFINE_boolean('is_training', True, 'Is training?')
@@ -82,18 +80,18 @@ def train(tfrecord_folder, dataset_split, is_training):
                 train_op = optimizer.minimize(total_loss, global_step)
 
         variables_to_restore = slim.get_variables_to_restore(
-            exclude=(models.EXCLUDE_LIST_MAP[FLAGS.model_variant]
+            exclude=(core.MODEL_MAP[FLAGS.model_variant].exclude_list()
                      + ['adam', 'global_step']))
         def name_in_checkpoint(var):
             return var.op.name.replace(FLAGS.model_variant + '/', '')
         variables_to_restore = {
             name_in_checkpoint(var):var for var in variables_to_restore
-            if 'vgg_16' in var.op.name}
+            if 'vgg_16' in var.op.name
+        }
 
         restorer = tf.train.Saver(variables_to_restore)
         def init_fn(scaffold, sess):
             restorer.restore(sess, FLAGS.restore_ckpt_path)
-
 
         class _LoggerHook(tf.train.SessionRunHook):
             def begin(self):
@@ -126,8 +124,8 @@ def train(tfrecord_folder, dataset_split, is_training):
 
                     format_str = ('%s: step %d, loss = %.2f (%.1f examples/sec; '
                                   '%.3f sec/batch)')
-                    print (format_str % (datetime.now(), self._step, loss_value,
-                                         examples_per_sec, sec_per_batch))
+                    print(format_str % (datetime.now(), self._step, loss_value,
+                                        examples_per_sec, sec_per_batch))
 
         config = tf.ConfigProto(log_device_placement=False)
         config.gpu_options.allow_growth = True

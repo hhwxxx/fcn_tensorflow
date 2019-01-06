@@ -11,15 +11,15 @@ NUMBER_CLASSES = 21
 IGNORE_LABEL = 255
 
 MODEL_MAP = {
-    'fcn_32s': models.fcn_32s,
-    'fcn_16s': models.fcn_16s,
-    'fcn_8s' : models.fcn_8s,
+    'fcn_32s': models.FCN32s,
+    'fcn_16s': models.FCN16s,
+    'fcn_8s': models.FCN8s,
 }
 
 
 def inference(model, images, is_training):
-    model = MODEL_MAP[model]
-    logits = model(images, is_training)
+    model = MODEL_MAP[model](NUMBER_CLASSES, is_training)
+    logits = model.extract_features(images)
 
     return logits
 
@@ -40,5 +40,6 @@ def loss(logits, labels):
     tf.losses.add_loss(cross_entropy_loss)
     
     total_loss = tf.losses.get_total_loss()
+    total_loss = tf.identity(total_loss, 'total_loss')
     
     return total_loss

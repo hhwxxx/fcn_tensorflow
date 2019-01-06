@@ -75,12 +75,12 @@ def eval(tfrecord_folder, dataset_split, is_training):
 
         config = tf.ConfigProto(allow_soft_placement=True)
         config.gpu_options.allow_growth = True
-        with tf.train.MoniteredSession(
+        with tf.train.MonitoredSession(
                 session_creator=tf.train.ChiefSessionCreator(
                     config=config,
                     checkpoint_dir=FLAGS.checkpoint_dir
                 )) as mon_sess:
-            for i in range(num_batches):
+            for _ in range(num_batches):
                 mon_sess.run(update_op)
 
             summary = mon_sess.run(summary_op)

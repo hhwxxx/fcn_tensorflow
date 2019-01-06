@@ -28,7 +28,7 @@ flags.DEFINE_string('checkpoint_dir',
                     'Directory containing trained checkpoints.')
 
 flags.DEFINE_string('vis_dir',
-                    './train/fcn_32s/vis',
+                    './exp/fcn_32s/vis',
                     'Directory containing visualization results.')
 
 flags.DEFINE_boolean('is_training', False, 'Is training?')

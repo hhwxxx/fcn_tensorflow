@@ -2,7 +2,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import sys
 
 import tensorflow as tf 
 import numpy as np 
@@ -10,7 +9,6 @@ import matplotlib.pyplot as plt
 
 import core
 import input_pipeline
-import models
 
 
 flags = tf.app.flags
@@ -64,7 +62,7 @@ def predict():
         image = tf.image.decode_jpeg(image, channels=3)
         original_image = image
         image = tf.image.resize_images(
-            image, models.INPUT_SIZE,
+            image, input_pipeline.INPUT_SIZE,
             method=tf.image.ResizeMethod.BILINEAR, align_corners=True)
 
         logits = core.inference(

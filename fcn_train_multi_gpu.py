@@ -33,19 +33,21 @@ flags.DEFINE_string('restore_ckpt_path',
                     'Path to checkpoint.')
 
 flags.DEFINE_string('train_dir',
-                    './exp/fcn_32s/train',
+                    './exp/fcn_32s_multi_gpu/train',
                     'Training directory.')
 
 flags.DEFINE_boolean('is_training', True, 'Is training?')
 flags.DEFINE_integer('batch_size', 8, 'Batch size used for train.')
 flags.DEFINE_integer('num_epochs', 500, 'Number of epochs to train.')
 
-flags.DEFINE_float('initial_learning_rate', 0.00001,
+flags.DEFINE_float('initial_learning_rate', 0.0001,
                    'Initial learning rate.')
 flags.DEFINE_integer('num_epochs_per_decay', 200,
                      'Decay steps in exponential learning rate decay policy.')
 flags.DEFINE_float('learning_rate_decay_factor', 0.9,
                    'Decay rate in exponential learning rate decay policy.')
+flags.DEFINE_boolean('staircase', True,
+                     'Whether learning rate decay to be in staircase.')
 
 flags.DEFINE_integer('save_checkpoint_steps', 500, 'Save checkpoint steps.')
 flags.DEFINE_integer('save_summaries_steps', 100, 'Save summaries steps.')
@@ -53,7 +55,7 @@ flags.DEFINE_integer('log_frequency', 10, 'Log frequency.')
 
 
 def train(tfrecord_folder, dataset_split, is_training):
-    with tf.Graph().as_default(), tf.device('/cpu:0'):
+    with tf.Graph().as_default() as g:
         global_step = tf.train.get_or_create_global_step()
 
         with tf.device('/cpu:0'):
@@ -71,7 +73,7 @@ def train(tfrecord_folder, dataset_split, is_training):
         decay_steps = int(num_batches_per_epoch * FLAGS.num_epochs_per_decay)
         learning_rate = tf.train.exponential_decay(
             FLAGS.initial_learning_rate, global_step, decay_steps,
-            FLAGS.learning_rate_decay_factor, staircase=True)
+            FLAGS.learning_rate_decay_factor, staircase=FLAGS.staircase)
         tf.summary.scalar('learning_rate', learning_rate)
 
         # TODO(hhw): Change to adam optimizer.
@@ -127,11 +129,11 @@ def train(tfrecord_folder, dataset_split, is_training):
             def before_run(self, run_context):
                 self._step += 1
                 loss_dict = {
-                    'cross_entropy': tf.get_default_graph().get_tensor_by_name(
+                    'cross_entropy': g.get_tensor_by_name(
                         'tower_{}/cross_entropy_loss:0'.format(0)),
-                    'regularization': tf.get_default_graph().get_tensor_by_name(
+                    'regularization': g.get_tensor_by_name(
                         'tower_{}/regularization_loss:0'.format(0)),
-                    'total': tf.get_default_graph().get_tensor_by_name(
+                    'total': g.get_tensor_by_name(
                         'tower_{}/total_loss:0'.format(0)),
                 }
                 return tf.train.SessionRunArgs(loss_dict)
@@ -151,7 +153,7 @@ def train(tfrecord_folder, dataset_split, is_training):
                                   'tower_loss = {:7.5f}, '
                                   'cross_entropy_loss = {:7.5f}, '
                                   'regularization_loss = {:7.5f}, '
-                                  ' ({:5.3f} examples/sec; {:02.3} sec/batch)')
+                                  '({:5.3f} examples/sec; {:02.3} sec/batch)')
                     print(format_str.format(datetime.now(), self._step,
                                             loss_dict['total'],
                                             loss_dict['cross_entropy'],

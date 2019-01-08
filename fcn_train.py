@@ -40,6 +40,8 @@ flags.DEFINE_integer('decay_steps', 1000,
                      'Decay steps in exponential learning rate decay policy.')
 flags.DEFINE_float('decay_rate', 0.9,
                    'Decay rate in exponential learning rate decay policy.')
+flags.DEFINE_boolean('staircase', True,
+                     'Whether learning rate decay to be in staircase.')
 
 flags.DEFINE_integer('save_checkpoint_steps', 500, 'Save checkpoint steps.')
 flags.DEFINE_integer('save_summaries_steps', 100, 'Save summaries steps.')
@@ -64,11 +66,10 @@ def train(tfrecord_folder, dataset_split, is_training):
         total_loss = core.loss(logits, labels)
 
         tf.summary.histogram('logits', logits)
-        tf.summary.scalar('total_loss', total_loss)
 
         learning_rate = tf.train.exponential_decay(
             FLAGS.initial_learning_rate, global_step, FLAGS.decay_steps,
-            FLAGS.decay_rate, staircase=False)
+            FLAGS.decay_rate, staircase=FLAGS.staircase)
 
         tf.summary.scalar('learning_rate', learning_rate)
         for var in tf.model_variables():
@@ -109,8 +110,14 @@ def train(tfrecord_folder, dataset_split, is_training):
 
             def before_run(self, run_context):
                 self._step += 1
-                # Asks for loss value.
-                return tf.train.SessionRunArgs(total_loss)
+                loss_dict = {
+                    'cross_entropy': g.get_tensor_by_name(
+                        'cross_entropy_loss:0'),
+                    'regularization': g.get_tensor_by_name(
+                        'regularization_loss:0'),
+                    'total': g.get_tensor_by_name('total_loss:0')
+                }
+                return tf.train.SessionRunArgs(loss_dict)
 
             def after_run(self, run_context, run_values):
                 if self._step % FLAGS.log_frequency == 0:
@@ -118,14 +125,20 @@ def train(tfrecord_folder, dataset_split, is_training):
                     duration = current_time - self._start_time
                     self._start_time = current_time
 
-                    loss_value = run_values.results
+                    loss_dict = run_values.results
                     examples_per_sec = (FLAGS.log_frequency
                                         * FLAGS.batch_size / duration)
                     sec_per_batch = float(duration / FLAGS.log_frequency)
 
-                    format_str = ('%s: step %d, loss = %.2f (%.1f examples/sec; '
-                                  '%.3f sec/batch)')
-                    print(format_str % (datetime.now(), self._step, loss_value,
+                    format_str = ('%s: step %d, '
+                                  'total_loss = %.5f, '
+                                  'cross_entropy = %.5f, '
+                                  'regularization = %.5f, '
+                                  '(%.1f examples/sec; %.3f sec/batch)')
+                    print(format_str % (datetime.now(), self._step,
+                                        loss_dict['total'],
+                                        loss_dict['cross_entropy'],
+                                        loss_dict['regularization'],
                                         examples_per_sec, sec_per_batch))
 
         config = tf.ConfigProto(log_device_placement=False)

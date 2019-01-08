@@ -113,4 +113,3 @@ def average_gradients(tower_grads):
         average_grads.append(grad_and_var)
 
     return average_grads
-

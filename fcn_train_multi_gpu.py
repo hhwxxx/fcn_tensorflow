@@ -17,7 +17,7 @@ slim = tf.contrib.slim
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 
-flags.DEFINE_integer('num_gpus', 2, 'How many GPUs to use.')
+flags.DEFINE_integer('num_gpus', 1, 'How many GPUs to use.')
 
 flags.DEFINE_string('tfrecord_folder',
                     './tfrecords',
@@ -25,7 +25,7 @@ flags.DEFINE_string('tfrecord_folder',
 flags.DEFINE_string('dataset_split', 'train',
                     'Using which dataset split to train the network.')
 
-flags.DEFINE_string('model_variant', 'fcn_8s', 'Model variant.')
+flags.DEFINE_string('model_variant', 'fcn_32s', 'Model variant.')
 flags.DEFINE_boolean('use_init_model', True,
                      'Whether to initialize variables from pretrained model.')
 flags.DEFINE_string('restore_ckpt_path',
@@ -33,7 +33,7 @@ flags.DEFINE_string('restore_ckpt_path',
                     'Path to checkpoint.')
 
 flags.DEFINE_string('train_dir',
-                    './exp/fcn_8s/train',
+                    './exp/fcn_32s/train',
                     'Training directory.')
 
 flags.DEFINE_boolean('is_training', True, 'Is training?')
@@ -48,61 +48,8 @@ flags.DEFINE_float('learning_rate_decay_factor', 0.9,
                    'Decay rate in exponential learning rate decay policy.')
 
 flags.DEFINE_integer('save_checkpoint_steps', 500, 'Save checkpoint steps.')
+flags.DEFINE_integer('save_summaries_steps', 100, 'Save summaries steps.')
 flags.DEFINE_integer('log_frequency', 10, 'Log frequency.')
-
-
-# TODO(hhw): Move to core.py
-def tower_loss(scope, images, labels):
-    logits = core.inference(FLAGS.model_variant, images,
-                            is_training=FLAGS.is_training)
-
-    labels = tf.one_hot(labels, depth=core.NUMBER_CLASSES, 
-                        on_value=1, off_value=0)
-    cross_entropy_loss = tf.losses.softmax_cross_entropy(
-        onehot_labels=labels, logits=logits, scope=scope)
-    regularization_loss = tf.losses.get_regularization_loss()
-    total_loss = cross_entropy_loss + regularization_loss
-    total_loss = tf.identity(total_loss, 'total_loss')
-
-    tf.summary.scalar('cross_entropy_loss', cross_entropy_loss)
-    tf.summary.scalar('regularization_loss', regularization_loss)
-    tf.summary.scalar('total_loss', total_loss)
-
-    return total_loss
-
-
-# TODO(hhw): Move to core.py
-def average_gradients(tower_grads):
-    """Calculate the average gradient for each shared variable across all towers.
-
-    Note that this function provides a synchronization point across all towers.
-    Args:
-        tower_grads: List of lists of (gradient, variable) tuples. The outer list
-        is over individual gradients. The inner list is over the gradient
-        calculation for each tower.
-
-    Returns:
-        List of pairs of (gradient, variable) where the gradient has been averaged
-        across all towers.
-    """
-    average_grads = []
-    for grad_and_vars in zip(*tower_grads):
-        # Note that each grad_and_vars looks like the following:
-        #   ((grad0_gpu0, var0_gpu0), ... , (grad0_gpuN, var0_gpuN))
-        grads = []
-        for g, _ in grad_and_vars:
-            expanded_g = tf.expand_dims(g, axis=0)
-            grads.append(expanded_g)
-
-        grad = tf.concat(values=grads, axis=0)
-        grad = tf.reduce_mean(grad, axis=0)
-
-        var = grad_and_vars[0][1]
-        grad_and_var = (grad, var)
-
-        average_grads.append(grad_and_var)
-
-    return average_grads
 
 
 def train(tfrecord_folder, dataset_split, is_training):
@@ -135,26 +82,32 @@ def train(tfrecord_folder, dataset_split, is_training):
             for i in xrange(FLAGS.num_gpus):
                 with tf.device('/gpu:{}'.format(i)):
                     with tf.name_scope('{}_{}'.format('tower', i)) as scope:
-                        loss = tower_loss(scope, images, labels)
-
-                        # tf.get_variable_scope().reuse_variables()
+                        loss = core.tower_loss(FLAGS.model_variant, images,
+                                               labels, is_training, scope)
 
                         grads = optimizer.compute_gradients(
                             loss, tf.trainable_variables())
 
                         tower_grads.append(grads)
 
-        grads = average_gradients(tower_grads)
+        grads = core.average_gradients(tower_grads)
 
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(update_ops):
             train_op = optimizer.apply_gradients(grads, global_step=global_step)
 
-
         if FLAGS.use_init_model:
+            def name_in_checkpoint(var):
+                return var.op.name.replace(FLAGS.model_variant + '/', '')
+
             variables_to_restore = slim.get_variables_to_restore(
-                exclude=(models.EXCLUDE_LIST_MAP[FLAGS.model_variant]
+                exclude=(core.MODEL_MAP[FLAGS.model_variant].exclude_list()
                          + ['global_step', 'adam']))
+            variables_to_restore = {
+                name_in_checkpoint(var):var for var in variables_to_restore
+                if 'vgg_16' in var.op.name
+            }
+
             restorer = tf.train.Saver(variables_to_restore)
             def init_fn(scaffold, sess):
                 restorer.restore(sess, FLAGS.restore_ckpt_path)
@@ -173,10 +126,15 @@ def train(tfrecord_folder, dataset_split, is_training):
 
             def before_run(self, run_context):
                 self._step += 1
-                return tf.train.SessionRunArgs(
-                    [tf.get_default_graph().get_tensor_by_name(
-                        'tower_{}/total_loss:0'.format(i)) 
-                     for i in range(FLAGS.num_gpus)])
+                loss_dict = {
+                    'cross_entropy': tf.get_default_graph().get_tensor_by_name(
+                        'tower_{}/cross_entropy_loss:0'.format(0)),
+                    'regularization': tf.get_default_graph().get_tensor_by_name(
+                        'tower_{}/regularization_loss:0'.format(0)),
+                    'total': tf.get_default_graph().get_tensor_by_name(
+                        'tower_{}/total_loss:0'.format(0)),
+                }
+                return tf.train.SessionRunArgs(loss_dict)
 
             def after_run(self, run_context, run_values):
                 if self._step % FLAGS.log_frequency == 0:
@@ -184,14 +142,20 @@ def train(tfrecord_folder, dataset_split, is_training):
                     duration = current_time - self._start_time
                     self._start_time = current_time
 
-                    loss_value = run_values.results
+                    loss_dict = run_values.results
                     examples_per_sec = (FLAGS.log_frequency
                                         * FLAGS.batch_size / duration)
                     sec_per_batch = float(duration / FLAGS.log_frequency)
 
-                    format_str = ('{}: step {}, tower_loss = {} ({:5.3f} '
-                                  'examples/sec; {:02.3} sec/batch)')
-                    print(format_str.format(datetime.now(), self._step, loss_value,
+                    format_str = ('{}: step {}, '
+                                  'tower_loss = {:7.5f}, '
+                                  'cross_entropy_loss = {:7.5f}, '
+                                  'regularization_loss = {:7.5f}, '
+                                  ' ({:5.3f} examples/sec; {:02.3} sec/batch)')
+                    print(format_str.format(datetime.now(), self._step,
+                                            loss_dict['total'],
+                                            loss_dict['cross_entropy'],
+                                            loss_dict['regularization'],
                                             examples_per_sec, sec_per_batch))
 
         num_train_steps = int(num_batches_per_epoch * FLAGS.num_epochs)
@@ -205,7 +169,7 @@ def train(tfrecord_folder, dataset_split, is_training):
                        tf.train.NanTensorHook(loss),
                        _LoggerHook()],
                 config=config,
-                save_summaries_steps=100,
+                save_summaries_steps=FLAGS.save_summaries_steps,
                 save_checkpoint_steps=FLAGS.save_checkpoint_steps) as mon_sess:
             while not mon_sess.should_stop():
                 mon_sess.run(train_op)

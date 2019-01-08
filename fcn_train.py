@@ -42,6 +42,7 @@ flags.DEFINE_float('decay_rate', 0.9,
                    'Decay rate in exponential learning rate decay policy.')
 
 flags.DEFINE_integer('save_checkpoint_steps', 500, 'Save checkpoint steps.')
+flags.DEFINE_integer('save_summaries_steps', 100, 'Save summaries steps.')
 flags.DEFINE_integer('log_frequency', 10, 'Log frequency.')
 
 
@@ -136,6 +137,7 @@ def train(tfrecord_folder, dataset_split, is_training):
                        tf.train.NanTensorHook(total_loss),
                        _LoggerHook()],
                 config=config,
+                save_summaries_steps=FLAGS.save_summaries_steps,
                 save_checkpoint_steps=FLAGS.save_checkpoint_steps) as mon_sess:
             while not mon_sess.should_stop():
                 mon_sess.run(train_op)
